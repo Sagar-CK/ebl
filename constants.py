@@ -16,6 +16,11 @@ The user has explained their motivation, goal, and previous experience for muscl
 Ask the user if there's anything additional they would like to share, not necessarily related to the questions asked.
 """
 
+MUSCLE_PRROMPT_IMAGES = """
+Describe the person in the image and their body type in relation to the goal. Only include information that can be inferred from the image.
+Be critical and honest. Include specific details about what you see in the image and why they are not achieving their goal.
+"""
+
 MUSCLE_PROMPT = """
 You now know the user's motivation, goal, previous experience, and additional notes.
 Work backwards from this information to understand why user's previous approach might have been ineffective or unsustainable.

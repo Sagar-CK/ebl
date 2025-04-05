@@ -1,13 +1,12 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
-from openai import OpenAI, AsyncOpenAI
+from openai import OpenAI
 
 import os
-import json
-from schemas import ChatRequest, Plan
+from pprint import pprint
+from schemas import ChatRequest, Plan, ResponsePlan
 import constants
-import requests
 from io import BytesIO
 
 load_dotenv()
@@ -21,7 +20,7 @@ open_router_client = OpenAI(
 )
 
 @app.post("/chat/plan")
-async def chat_plan(request: ChatRequest):
+async def chat_plan(request: ChatRequest) -> ResponsePlan:
     
     if not os.path.exists("messages"):
         os.makedirs("messages")
@@ -32,17 +31,21 @@ async def chat_plan(request: ChatRequest):
 
     # Select the appropriate system instruction
     system_instruction = constants.MUSCLE_PROMPT
+
     if len(request.messages) // 2 == 1:
         system_instruction = constants.MUSCLE_PROMPT_MOTIVATION
     elif len(request.messages) // 2 == 2:
         system_instruction = constants.MUSCLE_PROMPT_PREV
     elif len(request.messages) // 2 == 3:
         system_instruction = constants.MUSCLE_PROMPT_NOTES
-
+    
     # Construct OpenAI messages
+    image_messages = []
+    text_messages = []
     openai_messages = [{"role": "system", "content": system_instruction}]
     for m in request.messages:
         openai_messages.append({"role": m.role, "content": m.content})
+        text_messages.append(openai_messages[-1])
     for url in request.photo_urls or []:
         openai_messages.append({
             "role": "user",
@@ -53,14 +56,46 @@ async def chat_plan(request: ChatRequest):
                 }
             ]
         })
+        image_messages.append(openai_messages[-1])
 
     model_name = constants.LLM_FLASH
     
     if system_instruction == constants.MUSCLE_PROMPT:
         model_name = constants.LLM_PRO
             
-        # If it's time to generate a full plan, run a two-step call
         try:
+            # remove the original system prompt
+            final_messages = [{"role":"system", "content": constants.MUSCLE_PRROMPT_IMAGES}] + text_messages
+            final_messages.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": constants.MUSCLE_PRROMPT_IMAGES,
+                        },
+                        *[
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": url},
+                            }
+                            for url in request.photo_urls or []
+                        ]
+                    ]
+                }
+            )
+            pprint(final_messages)
+            
+            image_description = open_router_client.chat.completions.create(
+                model="x-ai/grok-2-vision-1212",
+                messages=final_messages,
+            )
+            
+            print(image_description)
+            if image_description.choices[0].message.refusal:
+                raise HTTPException(status_code=400, detail="Refusal to generate image description.")
+            
+            openai_messages.append({"role": "assistant", "content": image_description.choices[0].message.content})
             response = open_router_client.chat.completions.create(
                 model=model_name,
                 messages=openai_messages,
@@ -72,7 +107,6 @@ async def chat_plan(request: ChatRequest):
                 {"role": "system", "content": constants.MUSCLE_PLAN},
                 {"role": "user", "content": detailed_summary},
             ]
-            
 
             completion = open_router_client.beta.chat.completions.parse(
                 model="o3-mini",
@@ -87,16 +121,18 @@ async def chat_plan(request: ChatRequest):
             if not plan_response.parsed:
                 raise HTTPException(status_code=400, detail="Invalid plan response.")
             
-            return plan_response.parsed
+            return ResponsePlan(
+                plan=plan_response.parsed
+            )
 
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
-        
     else:
         model_name = constants.LLM_FLASH
         response = client.responses.create(
             model=model_name,
             input=openai_messages,
         )
-        return response.output_text
+        
+        return ResponsePlan(response=response.output_text)

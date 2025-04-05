@@ -32,3 +32,8 @@ class Plan(BaseModel):
     goal: str = Field(..., description="The main goal of the plan. Max 3 words.")
     motivation: str = Field(..., description="Motivation behind the goal. Max one sentence.")
     stages: List[Stage]
+
+# Define pydantic model that is union of str or plan
+class ResponsePlan(BaseModel):
+    response: Optional[str] = None
+    plan: Optional[Plan] = None
