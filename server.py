@@ -5,7 +5,7 @@ from openai import OpenAI
 
 import os
 from pprint import pprint
-from schemas import ChatRequest, Plan, ResponsePlan
+from schemas import ChatRequest, Plan, ResponsePlan, ChangePlanRequest
 import constants
 from io import BytesIO
 
@@ -30,7 +30,7 @@ async def chat_plan(request: ChatRequest) -> ResponsePlan:
             f.write(f"{message.role},{message.content}\n")
 
     # Select the appropriate system instruction
-    system_instruction = constants.MUSCLE_PROMPT
+    system_instruction = constants.MUSCLE_PLAN
 
     if len(request.messages) // 2 == 1:
         system_instruction = constants.MUSCLE_PROMPT_MOTIVATION
@@ -60,7 +60,7 @@ async def chat_plan(request: ChatRequest) -> ResponsePlan:
 
     model_name = constants.LLM_FLASH
     
-    if system_instruction == constants.MUSCLE_PROMPT:
+    if system_instruction == constants.MUSCLE_PLAN:
         model_name = constants.LLM_PRO
             
         try:
@@ -84,7 +84,6 @@ async def chat_plan(request: ChatRequest) -> ResponsePlan:
                     ]
                 }
             )
-            pprint(final_messages)
             
             image_description = open_router_client.chat.completions.create(
                 model="x-ai/grok-2-vision-1212",
@@ -136,3 +135,85 @@ async def chat_plan(request: ChatRequest) -> ResponsePlan:
         )
         
         return ResponsePlan(response=response.output_text)
+
+@app.post("/plan/redo")
+async def plan_redo(request: ChangePlanRequest) -> ResponsePlan:
+    # we just need to create a new plan based on the previous one and the messages 
+    system_instruction = constants.MUSCLE_PLAN + "This is the original plan: " + str(request.plan.model_dump())
+    openai_messages = [{"role": "system", "content": system_instruction}]
+    
+    text_messages = []
+    image_messages = []
+    
+    for m in request.messages:
+        openai_messages.append({"role": m.role, "content": m.content})
+        text_messages.append(openai_messages[-1])
+    
+    for url in request.photo_urls or []:
+        openai_messages.append({
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_image",
+                    "image_url": url,
+                }
+            ]
+        })
+        image_messages.append(openai_messages[-1])
+    
+    
+    pprint(openai_messages)
+    final_messages = [{"role":"system", "content": constants.MUSCLE_PRROMPT_IMAGES}] + text_messages
+    final_messages.append(
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": constants.MUSCLE_PRROMPT_IMAGES,
+                },
+                *[
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": url},
+                    }
+                    for url in request.photo_urls or []
+                ]
+            ]
+        }
+    )
+    
+    
+
+    image_description = open_router_client.chat.completions.create(
+        model="x-ai/grok-2-vision-1212",
+        messages=final_messages
+    )
+    
+    print(image_description)
+    if image_description.choices[0].message.refusal:
+        raise HTTPException(status_code=400, detail="Refusal to generate image description.")
+    openai_messages.append({"role": "assistant", "content": image_description.choices[0].message.content})
+    
+    response = open_router_client.chat.completions.create(
+        model=constants.LLM_PRO,
+        messages=openai_messages,
+    )
+    detailed_summary = response.choices[0].message.content
+    
+    plan_prompt = [
+        {"role": "system", "content": constants.MUSCLE_PLAN},
+        {"role": "user", "content": detailed_summary},
+    ]
+    completion = open_router_client.beta.chat.completions.parse(
+        model="o3-mini",
+        messages=plan_prompt,
+        response_format=ResponsePlan
+    )
+    
+    plan_response = completion.choices[0].message
+    if plan_response.refusal:
+        raise HTTPException(status_code=400, detail="Refusal to generate a plan.")
+    if not plan_response.parsed:
+        raise HTTPException(status_code=400, detail="Invalid plan response.")
+    return plan_response.parsed

@@ -44,8 +44,13 @@ if submitted and user_message.strip():
     full_response = ""
     try:
         # Sending the POST request to FastAPI endpoint with stream=True
-        with requests.post("http://localhost:1337/chat/plan", json=data, stream=True) as resp:
+        with requests.post("http://localhost:4269/chat/plan", json=data, stream=True) as resp:
             full_response = resp.content.decode("utf-8")
+            full_response = json.loads(full_response)
+            if len(st.session_state.messages) > 7:
+                full_response = full_response["plan"]
+            else:
+                full_response = full_response["response"]
 
         # Add assistant message to history
         st.session_state.messages.append({"role": "assistant", "content": full_response})

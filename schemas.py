@@ -17,7 +17,6 @@ class ChatRequest(BaseModel):
     session_id: str
     focus: Focus
     messages: List[Message]
-    video_urls: Optional[List[str]] = None
     photo_urls: Optional[List[str]] = None
 
 class BasicChatRequest(BaseModel):
@@ -35,5 +34,8 @@ class Plan(BaseModel):
 
 # Define pydantic model that is union of str or plan
 class ResponsePlan(BaseModel):
-    response: Optional[str] = None
+    response: Optional[str] = Field(None, description="The response to the user on the plan creation.")
     plan: Optional[Plan] = None
+    
+class ChangePlanRequest(ChatRequest):
+    plan: Plan
