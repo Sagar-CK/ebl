@@ -15,6 +15,10 @@ load_dotenv()
 app = FastAPI()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+open_router_client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=os.getenv("OPEN_ROUTER_KEY"),
+)
 
 @app.post("/chat/plan")
 async def chat_plan(request: ChatRequest):
@@ -51,41 +55,48 @@ async def chat_plan(request: ChatRequest):
         })
 
     model_name = constants.LLM_FLASH
+    
     if system_instruction == constants.MUSCLE_PROMPT:
+        model_name = constants.LLM_PRO
+            
+        # If it's time to generate a full plan, run a two-step call
+        try:
+            response = open_router_client.chat.completions.create(
+                model=model_name,
+                messages=openai_messages,
+            )
+
+            detailed_summary = response.choices[0].message.content
+
+            plan_prompt = [
+                {"role": "system", "content": constants.MUSCLE_PLAN},
+                {"role": "user", "content": detailed_summary},
+            ]
+            
+
+            completion = open_router_client.beta.chat.completions.parse(
+                model="o3-mini",
+                messages=plan_prompt,
+                response_format=Plan,
+            )
+            
+            plan_response = completion.choices[0].message
+
+            if plan_response.refusal:
+                raise HTTPException(status_code=400, detail="Refusal to generate a plan.")   
+            if not plan_response.parsed:
+                raise HTTPException(status_code=400, detail="Invalid plan response.")
+            
+            return plan_response.parsed
+
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+        
+    else:
         model_name = constants.LLM_FLASH
-        # model_name = constants.LLM_PRO
-    response = client.responses.create(
-        model=model_name,
-        input=openai_messages,
-    )
-
-    if system_instruction != constants.MUSCLE_PROMPT:
-        return response.output_text
-
-    # If it's time to generate a full plan, run a two-step call
-    try:
-        detailed_summary = response.output_text
-
-        plan_prompt = [
-            {"role": "system", "content": constants.MUSCLE_PLAN},
-            {"role": "user", "content": detailed_summary},
-        ]
-        
-
-        completion = client.beta.chat.completions.parse(
-            model="o3-mini",
-            messages=plan_prompt,
-            response_format=Plan,
+        response = client.responses.create(
+            model=model_name,
+            input=openai_messages,
         )
-        
-        plan_response = completion.choices[0].message
-
-        if plan_response.refusal:
-            raise HTTPException(status_code=400, detail="Refusal to generate a plan.")   
-        if not plan_response.parsed:
-            raise HTTPException(status_code=400, detail="Invalid plan response.")
-        
-        return plan_response.parsed
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return response.output_text

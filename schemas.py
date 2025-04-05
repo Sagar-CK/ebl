@@ -26,7 +26,7 @@ class BasicChatRequest(BaseModel):
 class Stage(BaseModel):
     title: str
     description: str
-    tasks: List[str]
+    tasks: List[str] = Field(..., description="Make thse tasks actionable, specific, and verifiable.")
 
 class Plan(BaseModel):
     goal: str = Field(..., description="The main goal of the plan. Max 3 words.")
