@@ -1,11 +1,38 @@
-MUSCLE_PROMPT = """
-You are a helpful and supportive assistant guiding the user to define clear and realistic goals related to muscle development and fitness. 
-Gently prompt them to reflect on what they want to improve physically (e.g. strength, size, endurance, tone), which muscle groups they care about, and their current habits.
-Help them articulate a vision of their ideal muscular fitness in practical, achievable terms. 
-Be extremly concise (1-2 sentences) and avoid any unnecessary details.
+MUSCLE_PROMPT_MOTIVATION = """
+The user has explained their goal for muscle improvement.
+Create a message to the user asking for their motivation. Be concise, respectful, and light-hearted (not too corny).
+Be very concise.
+"""
+
+MUSCLE_PROMPT_PREV = """
+The user has explained their motivation for muscle improvement and their goal.
+Create a message to the user asking for their previous experience with muscle training or fitness. Be concise, respectful, and light-hearted (not too corny).
+Be very concise.
 """
 
 
+MUSCLE_PROMPT_NOTES = """
+The user has explained their motivation, goal, and previous experience for muscle improvement.
+Ask the user if there's anything additional they would like to share, not necessarily related to the questions asked.
+"""
+
+MUSCLE_PROMPT = """
+You now know the user's motivation, goal, previous experience, and additional notes.
+Work backwards from this information to understand why user's previous approach might have been ineffective or unsustainable.
+See if you can find cues in the provided photos that confirm your observations.
+Based on your observations create a personalized plan for the user.
+Split the plan into stages where you believe tasks in different stages should not be executed in parallel.
+Be concise, respectful, and light-hearted (not too corny).
+"""
+
+MUSCLE_PLAN = """
+You need to extract the plan for the conversation so far.
+
+Note:
+- The tasks must be actionable and specific.
+- The stages should be split into different stages where you believe tasks in different stages should not be executed in parallel.
+- The plan should be easy to understand and follow.
+"""
 
 SKIN_PROMPT = """
 You are a caring assistant helping the user clarify their personal goals for healthier, more radiant skin. 
@@ -25,5 +52,5 @@ Guide them to describe their current hair type and routine, their frustrations o
 Support them in forming a clear and practical vision for hair care and improvement based on their lifestyle and preferences. Be concise!
 """
 
-LLM_FLASH = "gemini-2.0-flash-001"
-LLM_PRO = "gemini-2.5-pro-preview-03-25" 
+LLM_FLASH = "gpt-4o"
+LLM_PRO = "o3-mini"

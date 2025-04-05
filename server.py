@@ -1,76 +1,91 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
+from openai import OpenAI, AsyncOpenAI
+
 import os
 import json
-from schemas import ChatRequest
+from schemas import ChatRequest, Plan
 import constants
 import requests
+from io import BytesIO
 
 load_dotenv()
-client = genai.Client(api_key=os.getenv("API_KEY"))
 
 app = FastAPI()
 
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-
-@app.post("/chat/stream")
-async def chat_stream(request: ChatRequest):
-    """
-    Stream chat responses from the model.
-    """
-    messages = request.messages
-
-    response_data = {"text": ""} 
+@app.post("/chat/plan")
+async def chat_plan(request: ChatRequest):
     
-    # Convert messages to the format required by the model
-    response_data = {"text": ""}
-    
-    print(f"Received request: {request}")
-    if not os.path.exists("images"):
-        os.makedirs("images")
+    if not os.path.exists("messages"):
+        os.makedirs("messages")
+    path = f"messages/{request.session_id}.csv"
+    with open(path, "a") as f:
+        for message in request.messages:
+            f.write(f"{message.role},{message.content}\n")
+
+    # Select the appropriate system instruction
+    system_instruction = constants.MUSCLE_PROMPT
+    if len(request.messages) // 2 == 1:
+        system_instruction = constants.MUSCLE_PROMPT_MOTIVATION
+    elif len(request.messages) // 2 == 2:
+        system_instruction = constants.MUSCLE_PROMPT_PREV
+    elif len(request.messages) // 2 == 3:
+        system_instruction = constants.MUSCLE_PROMPT_NOTES
+
+    # Construct OpenAI messages
+    openai_messages = [{"role": "system", "content": system_instruction}]
+    for m in request.messages:
+        openai_messages.append({"role": m.role, "content": m.content})
+    for url in request.photo_urls or []:
+        openai_messages.append({
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_image",
+                    "image_url": url,
+                }
+            ]
+        })
+
+    model_name = constants.LLM_FLASH
+    if system_instruction == constants.MUSCLE_PROMPT:
+        model_name = constants.LLM_FLASH
+        # model_name = constants.LLM_PRO
+    response = client.responses.create(
+        model=model_name,
+        input=openai_messages,
+    )
+
+    if system_instruction != constants.MUSCLE_PROMPT:
+        return response.output_text
+
+    # If it's time to generate a full plan, run a two-step call
+    try:
+        detailed_summary = response.output_text
+
+        plan_prompt = [
+            {"role": "system", "content": constants.MUSCLE_PLAN},
+            {"role": "user", "content": detailed_summary},
+        ]
         
-    image_files = []
-    image_bytes = []
-    
-    for url in request.photo_urls:
-        img_data = requests.get(url).content
-        # hash the URL to create a unique filename
-        filename = url.split("/")[-1]
-        with open(f"images/{filename}.jpg", "wb") as handler:
-            handler.write(img_data)
-            image_bytes.append(img_data)
+
+        completion = client.beta.chat.completions.parse(
+            model="o3-mini",
+            messages=plan_prompt,
+            response_format=Plan,
+        )
         
-        image_files.append(f"images/{filename}.jpg")
+        plan_response = completion.choices[0].message
 
-    # Define a streaming generator function
-    async def event_stream():
-    
-        async for chunk in await client.aio.models.generate_content_stream(
-            model=constants.LLM_FLASH,
-            contents=[
-                str(messages),
-                types.Part.from_bytes(
-                    data=image_bytes[0],
-                    mime_type="image/jpeg",
-                ),
-            ],
-            config=types.GenerateContentConfig(
-                system_instruction=constants.MUSCLE_PROMPT,
-            ),
+        if plan_response.refusal:
+            raise HTTPException(status_code=400, detail="Refusal to generate a plan.")   
+        if not plan_response.parsed:
+            raise HTTPException(status_code=400, detail="Invalid plan response.")
+        
+        return plan_response.parsed
 
-        ):
-            if chunk and chunk.text:
-                # Update the response data with the new chunk of text
-                response_data["text"] += chunk.text
-                # Yield the data as a server-sent event
-                yield f"event: response\ndata: {json.dumps(response_data)}\n\n"
-
-        # Finalize the response
-        yield f"event: end\ndata: {json.dumps({'text': response_data['text']})}\n\n"
-
-    # Return the stream as a StreamingResponse
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
-
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
